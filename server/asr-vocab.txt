@@ -1,0 +1,54 @@
+# Words the recogniser has never heard, and what it turns them into instead.
+#
+# An English acoustic model has no token for "Claudex" or "pm2", so it emits the nearest
+# thing it does know. Contextual biasing inside sherpa can't help here - neither model
+# ships the bpe.vocab its hotword encoder needs - so we fix the text after the fact.
+#
+# Format:  Canonical = alias, alias, alias
+# Matching is case-insensitive and whole-word, spaces inside an alias are optional, and
+# the canonical spelling is written back. Longest alias wins.
+#
+# Acronyms and terms containing digits get their spelled-out forms for free ("VPS" also
+# matches "v p s", "pm2" also matches "pm two"), so most entries need no alias list.
+#
+# Add your own as you notice them - the file is read when the worker starts.
+# Keep aliases distinctive: a one-word alias that is also ordinary English ("to", "for")
+# will fire on innocent sentences.
+
+# Names this project uses that no model knows
+Claudex    = claude x, cloud x, cloud ex, clod x, claudex, claude ex, cloudex
+Cloudflare = cloud flare, cloud fair, cloud flair
+GitHub     = git hub
+Anthropic  = anthropic
+sherpa     = share pa
+zipformer  = zip former, zip formar
+nginx      = engine x
+tmux       = t mux, tee mux
+pnpm       = p n p m
+localhost  = local host
+websocket  = web socket
+websockets = web sockets
+
+# Digits and acronyms - aliases are generated, listed here only to be recognised at all
+pm2
+VPS
+tsx
+jsx
+npm
+API
+URL
+UI
+CLI
+JSON
+CSS
+HTML
+SSH
+HTTPS
+HTTP
+ASR
+LLM
+PCM
+ONNX
+env    = e n v
+stdout = standard out
+stderr = standard error

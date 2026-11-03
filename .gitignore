@@ -1,0 +1,12 @@
+node_modules/
+dist/
+dev-dist/
+*.local
+.DS_Store
+npm-debug.log*
+*.log
+.env
+.env.*
+!.env.example
+.claude/settings.local.json
+.taste-skill/

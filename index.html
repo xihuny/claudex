@@ -1,0 +1,42 @@
+<!doctype html>
+<!-- The scheme now lives in data-scheme (set by the script below); the old class="dark"
+     was vestigial - nothing in the app or Tailwind config keyed off it. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
+  <meta name="theme-color" content="#0a0a0b" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Claudex" />
+  <link rel="apple-touch-icon" href="/icon.svg" />
+  <title>Claudex</title>
+  <script>
+    // Set the appearance attributes before the first paint. The theme store does this
+    // too, but only once its module has been fetched, parsed and run - long enough on a
+    // cold start over a tunnel to flash the default dark palette at someone who chose
+    // light. Reads the same two localStorage keys as src/store/theme.ts; keep the key
+    // names, the theme list and the fallbacks in step with it.
+    (function () {
+      try {
+        var d = document.documentElement;
+        var theme = localStorage.getItem("cx_theme");
+        var scheme = localStorage.getItem("cx_scheme");
+        d.dataset.theme =
+          /^(claudex|catppuccin|rosepine|nord|everforest|tokyonight|solarized)$/.test(theme) ? theme : "claudex";
+        if (scheme !== "dark" && scheme !== "light") {
+          scheme = (scheme === "system" && !matchMedia("(prefers-color-scheme: dark)").matches) ? "light" : "dark";
+        }
+        d.dataset.scheme = scheme;
+        d.style.colorScheme = scheme;
+      } catch (e) {}
+    })();
+  </script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+</html>

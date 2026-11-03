@@ -1,0 +1,446 @@
+@import "tailwindcss";
+@import "@xterm/xterm/css/xterm.css";
+
+/* ── Design tokens ───────────────────────────────────────────────────────────
+   @theme declares the DEFAULT palette and is what Tailwind builds its utilities
+   from - it emits `background-color: var(--color-panel2)` rather than a literal, so
+   every one of the ~950 token usages in the app resolves through these custom
+   properties. Re-declaring the same names under a [data-theme][data-scheme] block is
+   therefore all a theme is: no component knows a theme exists.
+
+   Selector weight matters - @theme lands on :root (0,1,0), so the palette blocks use
+   two attributes (0,2,0) and win without !important.
+
+   The eleven palette names, and what each is for:
+     bg       the page behind everything
+     panel    raised surface (sidebar, cards, tool blocks)
+     panel2   the surface above that (inputs, chips, hover states)
+     border   hairlines; never used for text
+     fg       primary text
+     muted    secondary text and inactive icons
+     accent   the identity colour - active state, primary action, success
+     accent2  accent's companion, for a second category or a hover step
+     danger   destructive and error
+     warn     caution: bash mode, "pull first", quota pressure, local-only tunnel
+     warn2    warn's brighter step, for hover
+   Every colour in the UI comes from this list. Adding a twelfth means adding it to
+   all fourteen blocks below, which is the intended friction. */
+@theme {
+  /* Defaults mirror Claudex · dark - what you get before the bootstrap script runs
+     or if localStorage is empty. */
+  --color-bg: #0a0a0b;
+  --color-panel: #141416;
+  --color-panel2: #1d1d20;
+  --color-border: #232327;
+  --color-fg: #ededef;
+  --color-muted: #8a8a93;
+  --color-accent: #2bff88;
+  --color-accent2: #5dffaa;
+  --color-danger: #f0506e;
+  --color-warn: #f0b429;
+  --color-warn2: #f5c451;
+  /* The app chrome (top bar + sidebar) is one L-shaped frame a tone step off the panel,
+     tinted toward the theme's accent so it carries the palette's identity; the work sits
+     on a bg-coloured sheet inside it. Derived, so all fourteen theme blocks get it free. */
+  --color-frame: color-mix(in srgb, var(--color-panel) 97%, var(--color-accent));
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  /* Scales the palette can't express. These existed only as ad-hoc values scattered
+     through components, which is why polish had to be hand-tuned per element. */
+  /* One tight scale: chips 4-6, controls and rows 8-10, cards 12; the sheet and dialogs
+     use rounded-2xl (16). These re-key Tailwind's rounded-* utilities app-wide. */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+}
+
+/* Elevation is keyed on the scheme rather than the theme: on a dark surface a drop
+   shadow is nearly invisible and lift has to be implied with a hairline inner
+   highlight, while on a light one a real shadow does the work. Two blocks instead of
+   fourteen. */
+:root {
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.40);
+  --elev-2: 0 4px 16px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+  --elev-3: 0 12px 40px rgba(0, 0, 0, 0.55), inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  /* No glows: kept as a token so existing users resolve, but it draws nothing. */
+  --accent-glow: 0 0 0 transparent;
+}
+[data-scheme="light"] {
+  --elev-1: 0 1px 2px color-mix(in srgb, var(--color-fg) 8%, transparent);
+  --elev-2: 0 4px 16px color-mix(in srgb, var(--color-fg) 10%, transparent);
+  --elev-3: 0 14px 44px color-mix(in srgb, var(--color-fg) 14%, transparent);
+  --accent-glow: 0 0 0 transparent;
+}
+
+/* ═══ THEMES ══════════════════════════════════════════════════════════════════
+   Seven palettes, each in both schemes. Six are established schemes chosen because
+   they were designed for hours-long reading rather than for screenshots - they keep
+   contrast in the comfortable band instead of maximising it.
+
+   No light scheme uses #ffffff and no dark scheme uses #000000. Pure white at typical
+   monitor brightness is a glare source, and pure black maximises halation around
+   light text; every light background here is tinted warm or cool, and the darkest
+   background is #002b36. Light foregrounds are dark greys and slates, never black. */
+
+/* ── Claudex · the original identity ─────────────────────────────────────────
+   Near-black with the neon green. The light variant is a soft warm grey rather than
+   white, and pulls the green down to a forest tone that's legible on it - the neon
+   is about 1.3:1 on a pale background and unusable as text. */
+[data-theme="claudex"][data-scheme="dark"] {
+  --color-bg: #0a0a0b;
+  --color-panel: #141416;
+  --color-panel2: #1d1d20;
+  --color-border: #232327;
+  --color-fg: #e4e4e7;
+  --color-muted: #8a8a93;
+  --color-accent: #2bff88;
+  --color-accent2: #5dffaa;
+  --color-danger: #f0506e;
+  --color-warn: #f0b429;
+  --color-warn2: #f5c451;
+}
+[data-theme="claudex"][data-scheme="light"] {
+  --color-bg: #f1f2ef;
+  --color-panel: #e8eae5;
+  --color-panel2: #dfe2db;
+  --color-border: #d0d4c9;
+  --color-fg: #232620;
+  --color-muted: #5e655e;
+  --color-accent: #0f7d4f;
+  --color-accent2: #0b6440;
+  --color-danger: #c22a48;
+  --color-warn: #93650f;
+  --color-warn2: #7f560c;
+}
+
+/* ── Catppuccin · Mocha / Latte ──────────────────────────────────────────────
+   Pastel, low-saturation, the most widely adopted comfort palette going. */
+[data-theme="catppuccin"][data-scheme="dark"] {
+  --color-bg: #181825;
+  --color-panel: #1e1e2e;
+  --color-panel2: #313244;
+  --color-border: #45475a;
+  --color-fg: #cdd6f4;
+  --color-muted: #9399b2;
+  --color-accent: #a6e3a1;
+  --color-accent2: #94e2d5;
+  --color-danger: #f38ba8;
+  --color-warn: #f9e2af;
+  --color-warn2: #fab387;
+}
+[data-theme="catppuccin"][data-scheme="light"] {
+  --color-bg: #eff1f5;
+  --color-panel: #e6e9ef;
+  --color-panel2: #dce0e8;
+  --color-border: #ccd0da;
+  --color-fg: #484b64;
+  --color-muted: #6a6d82;
+  --color-accent: #327d22;
+  --color-accent2: #137a80;
+  --color-danger: #d20f39;
+  --color-warn: #996214;
+  --color-warn2: #bf4701;
+}
+
+/* ── Rosé Pine · Main / Dawn ─────────────────────────────────────────────────
+   Muted rose and pine. Dawn's surface sits *above* its base - that inversion is the
+   palette's own design, not a mistake. */
+[data-theme="rosepine"][data-scheme="dark"] {
+  --color-bg: #191724;
+  --color-panel: #1f1d2e;
+  --color-panel2: #26233a;
+  --color-border: #403d52;
+  --color-fg: #e0def4;
+  --color-muted: #908caa;
+  --color-accent: #9ccfd8;
+  --color-accent2: #c4a7e7;
+  --color-danger: #eb6f92;
+  --color-warn: #f6c177;
+  --color-warn2: #ebbcba;
+}
+[data-theme="rosepine"][data-scheme="light"] {
+  --color-bg: #faf4ed;
+  --color-panel: #fffaf3;
+  --color-panel2: #f2e9e1;
+  --color-border: #dfdad9;
+  --color-fg: #534e74;
+  --color-muted: #716d8c;
+  --color-accent: #286983;
+  --color-accent2: #7f659c;
+  --color-danger: #ad546d;
+  --color-warn: #9f6310;
+  --color-warn2: #c4453f;
+}
+
+/* ── Nord · Polar Night / Snow Storm ─────────────────────────────────────────
+   Cool arctic blue-grey. The lightest "dark" here, which suits a bright room. */
+[data-theme="nord"][data-scheme="dark"] {
+  --color-bg: #2e3440;
+  --color-panel: #3b4252;
+  --color-panel2: #434c5e;
+  --color-border: #4c566a;
+  --color-fg: #eceff4;
+  --color-muted: #a4adbd;
+  --color-accent: #88c0d0;
+  --color-accent2: #8fbcbb;
+  --color-danger: #cf888f;
+  --color-warn: #ebcb8b;
+  --color-warn2: #d18a73;
+}
+[data-theme="nord"][data-scheme="light"] {
+  --color-bg: #eceff4;
+  --color-panel: #e5e9f0;
+  --color-panel2: #dae0ea;
+  --color-border: #c7d0de;
+  --color-fg: #2e3440;
+  --color-muted: #4c566a;
+  --color-accent: #4e6f97;
+  --color-accent2: #437480;
+  --color-danger: #a8474f;
+  --color-warn: #8a6719;
+  --color-warn2: #a45837;
+}
+
+/* ── Everforest · warm low-saturation green ──────────────────────────────────
+   Built explicitly around reducing eye strain; the light variant's cream is the
+   gentlest background of the seven. */
+[data-theme="everforest"][data-scheme="dark"] {
+  --color-bg: #2d353b;
+  --color-panel: #343f44;
+  --color-panel2: #3d484d;
+  --color-border: #475258;
+  --color-fg: #dacfb7;
+  --color-muted: #9da9a0;
+  --color-accent: #a7c080;
+  --color-accent2: #83c092;
+  --color-danger: #e67e80;
+  --color-warn: #dbbc7f;
+  --color-warn2: #e69875;
+}
+[data-theme="everforest"][data-scheme="light"] {
+  --color-bg: #fdf6e3;
+  --color-panel: #f4f0d9;
+  --color-panel2: #efebd4;
+  --color-border: #ddd8c0;
+  --color-fg: #475258;
+  --color-muted: #677567;
+  --color-accent: #697801;
+  --color-accent2: #287f5e;
+  --color-danger: #e20d09;
+  --color-warn: #946a00;
+  --color-warn2: #b95309;
+}
+
+/* ── Tokyo Night · Night / Day ───────────────────────────────────────────────
+   Deep indigo with a blue accent - the only theme here whose identity colour isn't
+   green, which makes it the biggest visual departure. */
+[data-theme="tokyonight"][data-scheme="dark"] {
+  --color-bg: #16161e;
+  --color-panel: #1a1b26;
+  --color-panel2: #24283b;
+  --color-border: #414868;
+  --color-fg: #c0caf5;
+  --color-muted: #7c85b0;
+  --color-accent: #7aa2f7;
+  --color-accent2: #bb9af7;
+  --color-danger: #f7768e;
+  --color-warn: #e0af68;
+  --color-warn2: #ff9e64;
+}
+[data-theme="tokyonight"][data-scheme="light"] {
+  --color-bg: #e1e2e7;
+  --color-panel: #e9eaee;
+  --color-panel2: #d5d6dc;
+  --color-border: #c4c8da;
+  --color-fg: #343b58;
+  --color-muted: #60647b;
+  --color-accent: #1561ca;
+  --color-accent2: #8230ee;
+  --color-danger: #b63737;
+  --color-warn: #7d6037;
+  --color-warn2: #9c5100;
+}
+
+/* ── Solarized · Dark / Light ────────────────────────────────────────────────
+   The original eye-comfort palette: both schemes share one accent set and differ
+   only in which end of the base ramp is background, so switching scheme doesn't
+   change the character. Deliberately the lowest-contrast option here. */
+[data-theme="solarized"][data-scheme="dark"] {
+  --color-bg: #002b36;
+  --color-panel: #073642;
+  --color-panel2: #0d4653;
+  --color-border: #1a5b68;
+  --color-fg: #b3c2c2;
+  --color-muted: #839496;
+  --color-accent: #2aa198;
+  --color-accent2: #2f93d9;
+  --color-danger: #e56462;
+  --color-warn: #b58900;
+  --color-warn2: #e8652e;
+}
+[data-theme="solarized"][data-scheme="light"] {
+  --color-bg: #fdf6e3;
+  --color-panel: #eee8d5;
+  --color-panel2: #e4ddc8;
+  --color-border: #d6cdb4;
+  --color-fg: #3d4f55;
+  --color-muted: #637474;
+  --color-accent: #217e77;
+  --color-accent2: #2076b3;
+  --color-danger: #da2925;
+  --color-warn: #8f6c00;
+  --color-warn2: #c44815;
+}
+
+* { -webkit-tap-highlight-color: transparent; }
+/* Disable browser scroll-anchoring. It fights react-virtuoso's own scroll
+   management: as the virtualized list mounts/re-measures off-screen rows while you
+   scroll, the browser "helpfully" repositions scrollTop to compensate and yanks the
+   viewport (seen as the chat jumping down on mobile). Virtuoso repositions items
+   itself, so we never want the browser doing it too. */
+* { overflow-anchor: none; }
+/* iOS standalone-PWA bottom safe-area (home-indicator strip): the layout viewport ends
+   ABOVE it - 100dvh and `position: fixed` boxes stop at that line. The ONLY way app
+   surfaces reach the physical bottom edge is an IN-FLOW document one bottom-inset taller
+   than the viewport: its lower band renders into the strip at rest. Proven with color
+   debugging + a bottom-edge marker; shrinking this chain back to plain 100dvh brings the
+   black bar back under the sidebar. Hard rules:
+   - Heights stay `calc(100dvh + env(safe-area-inset-bottom))` (#app pads the inset so
+     content clears the home indicator while its background fills the strip).
+   - NEVER `overflow: hidden` on html/body - it clips at the short viewport → black bar.
+   - `overscroll-behavior` must be on the ROOT (html); on body alone it never reaches the
+     viewport.
+   - The taller document leaves a small real scroll range: App.tsx blocks document-level
+     touch scrolling and pins scrollTop to 0 (do NOT "fix" this by shrinking heights). */
+html, body, #root { height: calc(100dvh + env(safe-area-inset-bottom)); }
+html, body { overscroll-behavior: none; }
+/* Stay at 1×. `pan-x pan-y` is the value that keeps scrolling but withdraws pinch-zoom
+   and double-tap-to-zoom - NOT `manipulation`, which still permits a pinch. touch-action
+   doesn't inherit, but the effective behaviour is the intersection down the hit-test
+   chain, so declaring it on the root covers everything under it; a descendant can only
+   narrow it further (.xterm-viewport does, to pan-y). The gesture/wheel/key half of this
+   is useNoZoom() in App.tsx - neither half is sufficient alone. */
+html { touch-action: pan-x pan-y; }
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  /* Plex ships 400/500/600 here; a 700 request renders at 600 instead of a smeared fake bold. */
+  font-synthesis-weight: none;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+
+/* themed scrollbars - everywhere (replaces the ugly browser default). Derived from the
+   palette rather than fixed greys, so they stay legible in light mode instead of being
+   a dark smear on a white page. */
+:root { --scrollbar: color-mix(in srgb, var(--color-fg) 26%, transparent); }
+* { scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar);
+  border-radius: 9999px;
+  border: 2px solid transparent;   /* inset padding → slim, rounded thumb */
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--color-fg) 40%, transparent); }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* terminal tuning */
+.xterm { padding: 8px 6px 4px 10px; }
+.xterm-viewport { touch-action: pan-y; }
+.xterm-viewport::-webkit-scrollbar { width: 10px; }
+.xterm-viewport::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 9999px; border: 2px solid transparent; background-clip: padding-box; }
+.xterm-viewport::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--color-fg) 40%, transparent); }
+
+/* file editor (CodeMirror) - oneDark supplies the syntax colors, but its own surfaces are
+   #282c34, which sat as a lighter slab inside the near-black pane. Clearing them here rather
+   than in the editor's theme extension makes the override deterministic: CodeMirror mounts
+   its stylesheet at the TOP of <head> (style-mod inserts before head.firstChild) precisely
+   so app CSS wins at equal specificity, whereas two theme extensions fighting over the same
+   `&` selector are decided by extension order. Transparent, not a color, so the editor stays
+   whatever the pane behind it is. */
+.cm-editor,
+.cm-editor .cm-scroller,
+.cm-editor .cm-gutters { background-color: transparent; }
+
+/* hide scrollbars on chip rows */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }
+
+/* iOS-style continuous ("squircle") corners where supported; falls back to the regular
+   border-radius elsewhere. */
+.squircle { corner-shape: squircle; }
+
+/* While the on-screen keyboard is open (html[data-kb], set by useViewportFix) the home
+   indicator is gone, so bottom bars drop their big safe-area padding and hug the keyboard. */
+html[data-kb] .kb-tight { padding-bottom: 0.125rem !important; }
+
+/* ground for empty / login screens: flat, no gradient */
+.mesh { background: var(--color-bg); }
+
+::selection { background: color-mix(in srgb, var(--color-accent) 30%, transparent); }
+
+/* "Working…" twinkling star - the exact Claude Code CLI frame set. The glyph blooms
+   from a dot to a full asterisk-flower and back (· ✢ ✳ ✶ ✻ ✽), ping-ponging in place.
+   Content isn't tweenable, so each frame holds for its slice then snaps to the next.
+   Each glyph carries the U+FE0E text variation selector (\FE0E) so mobile renders the
+   thin monochrome asterisks instead of substituting colored emoji variants. */
+@keyframes cx-twinkle {
+  0%, 12%   { content: "·"; }   /* dot holds a touch longer at the start */
+  20%       { content: "✢\FE0E"; }
+  28%       { content: "✳\FE0E"; }
+  36%       { content: "✶\FE0E"; }
+  44%       { content: "✻\FE0E"; }
+  52%, 60%  { content: "✽\FE0E"; }   /* full bloom holds at the peak */
+  68%       { content: "✻\FE0E"; }
+  76%       { content: "✶\FE0E"; }
+  84%       { content: "✳\FE0E"; }
+  92%       { content: "✢\FE0E"; }
+  100%      { content: "·"; }
+}
+.cx-star {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.9rem;
+  height: 0.9rem;
+  color: var(--color-accent);
+}
+.cx-star::before {
+  content: "·";
+  font-size: 13px;
+  line-height: 1;
+  animation: cx-twinkle 1.6s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cx-star::before { animation: none; }
+}
+
+/* "Working…" text: flat colour that breathes between muted and full ink (no gradient text) */
+@keyframes cx-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+.cx-working {
+  color: var(--color-fg);
+  animation: cx-breathe 1.6s ease-in-out infinite;
+}
+
+/* Skeleton blocks shown while a chat's history hydrates: flat bars at their real size,
+   breathing gently so a loading chat reads as alive without a shimmer sweep. */
+.cx-skeleton {
+  background: var(--color-panel2);
+  animation: cx-breathe 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cx-working, .cx-skeleton { animation: none; }
+}

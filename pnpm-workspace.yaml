@@ -1,0 +1,10 @@
+# node-pty compiles a native addon; esbuild ships prebuilt binaries and needs no script.
+allowBuilds:
+  node-pty: true
+  esbuild: false
+
+# Express 4 pins transitive versions with known advisories; force the patched releases.
+overrides:
+  "body-parser@<1.20.9": ">=1.20.9"
+  "qs@<6.16.1": ">=6.16.1"
+  "proxy-addr@<2.0.8": ">=2.0.8"
