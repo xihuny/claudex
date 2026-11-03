@@ -1935,7 +1935,7 @@ app.post("/api/git/push", async (req, res) => {
   let msg = (req.body.message || "").trim();
   if (!msg) {
     const st = await gitRun(cwd, "git status --porcelain", true);   // raw: columnar, see gitRun
-    const files = st.out.split("\n").filter(Boolean).map((l) => l.slice(3).replace(/^"|"$/g, ""));
+    const files = st.out.split("\n").filter(Boolean).map((l) => l.slice(3).replace(/^"|"$/g, "").replace(/\/$/, ""));
     msg = autoMsg(files);
   }
   await gitRun(cwd, "git add -A");
@@ -2015,7 +2015,7 @@ app.get("/api/git/status", async (req, res) => {
     out.branch = br.ok ? br.out : "";
     out.files = st.out.split("\n").filter(Boolean).slice(0, 400).map((l) => {
       const code = l.slice(0, 2).trim() || "??";
-      let p = l.slice(3).replace(/^"|"$/g, "");
+      let p = l.slice(3).replace(/^"|"$/g, "").replace(/\/$/, "");   // untracked dirs end in "/"
       const ar = p.indexOf(" -> "); if (ar >= 0) p = p.slice(ar + 4);   // renames: show the new name
       return { code, path: p };
     });

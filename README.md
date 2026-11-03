@@ -2,6 +2,21 @@
 
 Self-hosted web UI for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Run it on your Mac, Linux box or VPS, then drive all your projects from any device: phone, tablet or another computer.
 
+![Claudex: a Claude Code chat with live tool cards, an inline diff and a test run](docs/images/hero.jpg)
+
+<table>
+  <tr>
+    <td width="33%"><img src="docs/images/phone-ask.jpg" alt="Claude asks a decision as tappable options on a phone"></td>
+    <td width="33%"><img src="docs/images/phone-goal.jpg" alt="A /goal run that kept working until the condition held"></td>
+    <td width="33%"><img src="docs/images/phone-projects.jpg" alt="Grouped projects in the phone drawer"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Decisions as taps, not typing</sub></td>
+    <td align="center"><sub><code>/goal</code>: keep going until it's true</sub></td>
+    <td align="center"><sub>Every project, in your pocket</sub></td>
+  </tr>
+</table>
+
 - **Chat** with Claude Code per project, with streaming replies, tool cards, diffs, tappable questions and `/goal` runs.
 - **Terminals** (xterm + node-pty) that share the same Claude session as the chat.
 - **Files**: browse, edit (CodeMirror), upload, download, inside each project only.
@@ -13,6 +28,17 @@ Self-hosted web UI for [Claude Code](https://docs.anthropic.com/en/docs/claude-c
 - **Shares**: give one person a prompt-only chat on one project, with its own link.
 
 Claudex uses your own Claude Code login. It calls no API of its own and stores nothing outside your machine.
+
+## Tour
+
+| | |
+|---|---|
+| ![Terminal mode running a load test](docs/images/terminal.jpg) | ![File explorer with the code editor](docs/images/files.jpg) |
+| **Terminal**: a real shell per project, sharing Claude's session with the chat. | **Files**: browse and edit with syntax highlighting, confined to the project. |
+| ![Git dialog with changed files and Commit & push](docs/images/git.jpg) | ![Run project dialog with Run locally and Expose](docs/images/run.jpg) |
+| **Git**: see what changed, commit and push in one tap. | **Previews**: start the dev server locally or expose it on a public URL. |
+| ![Share dialog with guest links](docs/images/share.jpg) | ![Command palette](docs/images/palette.jpg) |
+| **Shares**: a chat-only link to one project, with its own limits. | **Command palette**: `⌘K` to jump anywhere. |
 
 ## Quick start
 
