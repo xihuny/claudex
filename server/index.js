@@ -180,6 +180,12 @@ const projectForSession = (slug) =>
     : loadProjects().find((p) => p.session === baseSession(slug));
 // A project's session list - defaults to a single implicit primary when none stored.
 const projectSessions = (proj) => (Array.isArray(proj.sessions) && proj.sessions.length ? proj.sessions : [{ slug: proj.session, name: "Session 1" }]);
+// Project for a session that still exists. A closed session's slug resolves to null, so a
+// late socket reconnect can't respawn its process. Guest slugs are not in the list.
+const liveProjectForSession = (slug) => {
+  const proj = projectForSession(slug);
+  return proj && (guestIdOf(slug) || projectSessions(proj).some((s) => s.slug === slug)) ? proj : null;
+};
 
 // Usable context window for the running model - so the chat's context gauge divides by
 // the right number (a 1M-context model showing 100% at 200K was the bug). Defaults to
@@ -1192,6 +1198,8 @@ function killSession(slug) {
   if (t) { try { t.proc.kill(); } catch {} for (const w of t.clients) { try { w.close(); } catch {} } delete sessions[slug]; }
   try { fs.unlinkSync(chatFile(slug)); } catch {}
   try { fs.unlinkSync(path.join(DATA_DIR, `ask-mcp-${slug}.json`)); } catch {}
+  // Forget the session id. Slugs are reused ("::2" again), so a kept id would resume the old conversation.
+  if (sessMap[slug]) { delete sessMap[slug]; saveSess(); }
   if (USE_TMUX) { try { execSync(`"${tmuxBin()}" kill-session -t "cx_${slug.replace(/[^a-zA-Z0-9_-]/g, "_")}" 2>/dev/null`); } catch {} }
 }
 
@@ -1739,6 +1747,7 @@ app.post("/api/sessions", (req, res) => {
     let n = 2; while (used.has(`${GENERAL_SESSION}${SESSEP}${n}`)) n++;
     const entry = { slug: `${GENERAL_SESSION}${SESSEP}${n}`, name: `Chat ${n}` };
     list.push(entry); saveGeneralSessions(list);
+    if (sessMap[entry.slug]) { delete sessMap[entry.slug]; saveSess(); }   // never inherit a closed session's id
     return res.json(entry);
   }
   const projects = loadProjects();
@@ -1751,6 +1760,7 @@ app.post("/api/sessions", (req, res) => {
   const entry = { slug: `${proj.session}${SESSEP}${n}`, name: `Session ${n}` };
   list.push(entry);
   proj.sessions = list; saveProjects(projects);
+  if (sessMap[entry.slug]) { delete sessMap[entry.slug]; saveSess(); }   // never inherit a closed session's id
   res.json(entry);
 });
 // Rename any session (incl. the primary).
@@ -3326,7 +3336,7 @@ const armWsAuth = (ws, isOk) => { const t = setTimeout(() => { if (!isOk()) { tr
 const wss = new WebSocketServer({ noServer: true, maxPayload: WS_MAX_PAYLOAD });
 wss.on("connection", (ws, req) => {
   const slug = new URL(req.url, "http://x").searchParams.get("session") || "";
-  const proj = projectForSession(slug);
+  const proj = liveProjectForSession(slug);
   let ok = false;
   armWsAuth(ws, () => ok);
   // Liveness - see the chat ping-sweep below. Terminal frames are raw PTY bytes, so this
@@ -3376,7 +3386,7 @@ wssChat.on("connection", (ws, req) => {
   // the first payload is shaped.
   const wantEpoch = q.get("epoch") || "";
   const wantSince = Number(q.get("since")) || 0;
-  const proj = projectForSession(slug);
+  const proj = liveProjectForSession(slug);
   let ok = false;
   let guest = null;                    // set once a guest token authenticates (see below)
   armWsAuth(ws, () => ok);
