@@ -687,11 +687,14 @@ function setChatStatus(c, s) { if (c.status === s) return; c.status = s; chatEmi
 function userDefaults() {
   // The app's own pick wins over the environment and ~/.claude/settings.json - it's the
   // one the user set here, in Settings, and expects new chats to honour.
-  const out = { model: defaultModel() || process.env.ANTHROPIC_MODEL || null, effort: defaultEffort() };
+  const out = { model: defaultModel() || process.env.ANTHROPIC_MODEL || null, effort: defaultEffort(), advisor: null };
   try {
     const j = JSON.parse(fs.readFileSync(path.join(os.homedir(), ".claude", "settings.json"), "utf8"));
     if (!out.model && j.model) out.model = j.model;
     if (!out.effort && j.effortLevel) out.effort = j.effortLevel;
+    // `/advisor X` saves here and every live process hot-reloads it, so it is one
+    // global setting - no per-session pick to track or re-apply on respawn.
+    if (typeof j.advisorModel === "string" && j.advisorModel) out.advisor = j.advisorModel;
   } catch {}
   if (!out.model) out.model = PROBED_MODEL;
   return out;
@@ -742,6 +745,9 @@ function modelPayload(c) {
     chosen: r.model || null,             // the user's /model pick (re-applied on respawn)
     effort: r.effort || d.effort || null,
     def: d.model,                        // global default, shown before anything is known
+    // Global (settings.json advisorModel). A guest process runs with the advisor off.
+    advisor: guestForSlug(c.slug) ? null : d.advisor,
+    advisorOff: guestForSlug(c.slug) ? null : advisorOffReason(advisorFit(c)),   // set = inactive in this chat
     // Real window from the CLI's modelUsage once a turn has run. Before that, infer
     // from the pick or the default - those carry the "[1m]" suffix; raw API ids never do.
     window: c.window || ctxWindow(r.model || d.model),
@@ -753,6 +759,57 @@ const emitModel = (c) => chatEmit(c, { t: "model", ...modelPayload(c) });
 // work outlives the turn that started it.
 const emitBg = (c) => chatEmit(c, { t: "bg", n: c.bgTasks });
 const friendlyTool = (n) => String(n || "tool").replace(/^mcp__.+?__/, "");
+// An advisor_tool_result's content as a tool_result payload, worded like the CLI's own
+// line. Newer advisors return encrypted advice (only the main model can read it).
+function advisorResult(r) {
+  if (!r || r.type === "advisor_tool_result_error") return { result: `Advisor unavailable (${(r && r.error_code) || "error"})`, is_error: true };
+  const text = r.type === "advisor_result" && typeof r.text === "string" ? r.text : "";
+  if (r.stop_reason === "refusal") return { result: "Advisor declined to advise on this request" + (text ? "\n\n" + text : ""), is_error: false };
+  return { result: text || "Advisor has reviewed the conversation and will apply the feedback", is_error: false };
+}
+// Advisor pairing by model family: the advisor must rank at or above the chat's main
+// model, else the CLI quietly leaves it off (docs: "Choose an advisor model"). Exact for
+// current models; a few older-model exceptions (Opus 4.8 + Sonnet 5.5) aren't modelled.
+const FAMILY_RANK = { haiku: 0, sonnet: 1, opus: 2, fable: 3 };
+const famOf = (s) => { const m = String(s || "").toLowerCase(); return Object.keys(FAMILY_RANK).find((f) => m.includes(f)) || null; };
+const famName = (f) => f[0].toUpperCase() + f.slice(1);
+// null = no advisor set; otherwise the families and whether this chat can use it.
+function advisorFit(c) {
+  const d = userDefaults();
+  if (!d.advisor) return null;
+  const r = sessMap[c.slug] || {};
+  const adv = famOf(d.advisor), main = famOf(r.model || c.model || d.model);
+  if (!adv || !main) return { adv, main, active: true };   // can't tell - the CLI decides
+  return { adv, main, active: FAMILY_RANK[adv] >= FAMILY_RANK[main] };
+}
+// Families an advisor works with: "Haiku, Sonnet and Opus".
+function advisorScope(adv) {
+  const ok = Object.keys(FAMILY_RANK).filter((f) => FAMILY_RANK[f] <= FAMILY_RANK[adv]).map(famName);
+  return ok.length > 1 ? ok.slice(0, -1).join(", ") + " and " + ok[ok.length - 1] : ok[0];
+}
+// Why the advisor is off in this chat, or null when it's on (or unset).
+function advisorOffReason(f) {
+  return f && !f.active ? `${famName(f.main)} ranks above ${famName(f.adv)}, so the advisor is off in this chat` : null;
+}
+// Notice after /advisor: what changed, and what it means here and elsewhere.
+function advisorSetNotice(c) {
+  const f = advisorFit(c);
+  if (!f) return "Advisor off in all sessions.";
+  if (!f.adv || !f.main) return `Advisor: ${userDefaults().advisor}, for all sessions.`;
+  const A = famName(f.adv), M = famName(f.main);
+  if (!f.active) return `Advisor: ${A}, for all sessions. Not active here: ${M} ranks above ${A}. Active in ${advisorScope(f.adv)} chats.`;
+  if (f.adv === f.main) return `Advisor: ${A}, for all sessions. Active here: a second ${A} checks the first, at extra cost.`;
+  return `Advisor: ${A}, for all sessions. Active here with ${M}.`;
+}
+// Notice after /model while an advisor is set: what happens to it in this chat.
+function advisorModelNotice(c) {
+  const f = advisorFit(c);
+  if (!f || !f.adv || !f.main) return null;
+  const A = famName(f.adv), M = famName(f.main);
+  if (!f.active) return `${A} advisor is off with ${M}: ${M} ranks above ${A}. It comes back when you switch to a lower model.`;
+  if (f.adv === f.main) return `${A} advisor stays on: a second ${A} checks the first, at extra cost.`;
+  return `${A} advisor stays on with ${M}.`;
+}
 // Persist the transcript to disk (debounced) so it survives a server restart - the
 // UI rebuilds from this file on reconnect with no model call (zero tokens). Deltas were
 // already dropped in chatSend, so what's in c.events is exactly what gets saved.
@@ -1259,6 +1316,9 @@ function ensureChat(slug, proj) {
   // already set), so the hook must skip it to avoid a duplicate - and a race where the
   // hook's POST beats c.lastReply being set and sends the generic fallback body.
   const env = childEnv({ CLAUDEX_CHAT: "1" });
+  // The owner's advisorModel is global and would bill a guest's turns to the owner at the
+  // advisor's rates - keep it off in shares. Set after childEnv(), which strips CLAUDE_CODE_*.
+  if (guest) env.CLAUDE_CODE_DISABLE_ADVISOR_TOOL = "1";
   let child;
   try { child = spawn(CLAUDE_BIN, args, { cwd: proj.path, env }); }
   catch (e) { chatSend(c, { t: "result", ok: false, error: String((e && e.message) || e) }); c.running = false; chatSend(c, { t: "running", running: false }); return c; }
@@ -1305,6 +1365,8 @@ function ensureChat(slug, proj) {
         const bt = ev.content_block.type;
         if (bt === "thinking") setChatStatus(c, "Thinking…");
         else if (bt === "tool_use") setChatStatus(c, "Running " + friendlyTool(ev.content_block.name) + "…");
+        // An advisor consult pauses the stream (up to ~30 s, no deltas) - say so.
+        else if (bt === "server_tool_use" && ev.content_block.name === "advisor") setChatStatus(c, "Advising…");
         else if (bt === "text") setChatStatus(c, "");   // writing the reply - the cursor is the indicator
       } else if (ev && ev.type === "content_block_delta" && ev.delta) {
         if (ev.delta.type === "text_delta" && ev.delta.text) chatSend(c, { t: "delta", text: ev.delta.text });
@@ -1331,10 +1393,21 @@ function ensureChat(slug, proj) {
             if (arg === "default") delete r.model; else r.model = arg;
             c.window = 0;   // the old model's measured window no longer applies
             saveSess(); persistChat(c); emitModel(c);
+            // Deferred so the notice lands under the CLI's own confirmation line.
+            const note = guestForSlug(c.slug) ? null : advisorModelNotice(c);
+            if (note) setTimeout(() => chatSend(c, { t: "notice", kind: "advisor", text: note }), 300);
           } else if (c.turnCmd.startsWith("/effort ") && /^set effort level to /i.test(b.text)) {
             const arg = c.turnCmd.slice(8).trim();
             if (["low", "medium", "high", "xhigh", "max"].includes(arg)) r.effort = arg; else delete r.effort;
             saveSess(); emitModel(c);
+          } else if (c.turnCmd.startsWith("/advisor")) {
+            // The CLI saved (or refused to save) the pick in settings.json, which every
+            // chat reads - refresh all of them, then say what it means for this one. The
+            // short delay lets the file write land and puts the notice under the reply.
+            setTimeout(() => {
+              for (const s of Object.keys(chats)) emitModel(chats[s]);
+              chatSend(c, { t: "notice", kind: "advisor", text: advisorSetNotice(c) });
+            }, 300);
           }
         }
       }
@@ -1357,6 +1430,10 @@ function ensureChat(slug, proj) {
         if (b.type === "text" && b.text) chatSend(c, { t: "assistant", text: b.text });
         else if (b.type === "tool_use" && b.name === ASK_TOOL) continue;   // rendered via the /api/ask "ask" event, not as a tool card
         else if (b.type === "tool_use") { setChatStatus(c, "Running " + friendlyTool(b.name) + "…"); chatSend(c, { t: "tool", id: b.id, name: b.name, input: b.input }); }
+        // The advisor is a server tool: the call and its result both arrive inside
+        // assistant messages. Shown as one card through the normal tool events.
+        else if (b.type === "server_tool_use" && b.name === "advisor") { setChatStatus(c, "Advising…"); chatSend(c, { t: "tool", id: b.id, name: "advisor", input: { model: userDefaults().advisor } }); }
+        else if (b.type === "advisor_tool_result") chatSend(c, { t: "tool_result", ...advisorResult(b.content), id: b.tool_use_id });
       }
       return;
     }

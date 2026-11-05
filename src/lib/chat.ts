@@ -77,8 +77,12 @@ export interface ModelInfo {
   effort: string | null;
   def: string | null;
   window: number;
+  /** settings.json advisorModel ("opus", or a full id). Global, not per session. */
+  advisor: string | null;
+  /** Why the advisor is inactive in this chat (main model ranks above it); null = active or unset. */
+  advisorOff: string | null;
 }
-const EMPTY_MODEL: ModelInfo = { id: null, chosen: null, effort: null, def: null, window: 0 };
+const EMPTY_MODEL: ModelInfo = { id: null, chosen: null, effort: null, def: null, window: 0, advisor: null, advisorOff: null };
 
 interface ChatState {
   ws: WebSocket | null;
@@ -206,7 +210,7 @@ function reduce(c: ChatState, ev: any) {
       c.items = [...c.items, { kind: "goal_status", met: !!ev.met, failed: !!ev.failed, condition: String(ev.condition || ""), reason: ev.reason || "", iterations: ev.iterations, durationMs: ev.durationMs, tokens: ev.tokens }];
       break;
     case "model":
-      c.model = { id: ev.id ?? null, chosen: ev.chosen ?? null, effort: ev.effort ?? null, def: ev.def ?? null, window: Number(ev.window) || 0 };
+      c.model = { id: ev.id ?? null, chosen: ev.chosen ?? null, effort: ev.effort ?? null, def: ev.def ?? null, window: Number(ev.window) || 0, advisor: ev.advisor ?? null, advisorOff: ev.advisorOff ?? null };
       break;
     case "queue":
       c.queue = Array.isArray(ev.queue) ? ev.queue : [];
@@ -325,7 +329,7 @@ function connect(slug: string, c: ChatState) {
       c.bg = Number(m.bg) || 0;   // authoritative: background work survives a reconnect
       c.goal = m.goal ? { condition: String(m.goal.condition || ""), setAt: Number(m.goal.setAt) || Date.now(), iterations: Number(m.goal.iterations) || 0, lastReason: String(m.goal.lastReason || "") } : null;
       c.queue = Array.isArray(m.queue) ? m.queue : [];
-      if (m.model) c.model = { id: m.model.id ?? null, chosen: m.model.chosen ?? null, effort: m.model.effort ?? null, def: m.model.def ?? null, window: Number(m.model.window) || 0 };
+      if (m.model) c.model = { id: m.model.id ?? null, chosen: m.model.chosen ?? null, effort: m.model.effort ?? null, def: m.model.def ?? null, window: Number(m.model.window) || 0, advisor: m.model.advisor ?? null, advisorOff: m.model.advisorOff ?? null };
       // Same stale-turn cleanup for transcript items the killed turn left behind. An
       // unanswered ask_user card is the worst of these to leave live: the question is held
       // open by the claude process, so if that process is gone (server restart, crash)

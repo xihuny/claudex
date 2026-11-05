@@ -1,5 +1,5 @@
 import { Suspense, lazy, memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
-import { Plus, ArrowUp, Square, ChevronRight, Loader2, Check, X, Wrench, MessageSquare, Paperclip, Clock3, CircleHelp, Sparkles, FileText, Terminal, Target, TriangleAlert, Mic } from "lucide-react";
+import { Plus, ArrowUp, Square, ChevronRight, Loader2, Check, X, Wrench, MessageSquare, Paperclip, Clock3, CircleHelp, Sparkles, FileText, Terminal, Target, TriangleAlert, Mic, Brain } from "lucide-react";
 import { createPortal } from "react-dom";
 import { m as motion } from "motion/react";
 import { toast } from "sonner";
@@ -9,15 +9,23 @@ import { api, uploadImage, uploadUrl, fsFileUrl } from "@/lib/api";
 import { Lightbox } from "@/components/ui/Lightbox";
 import { cn } from "@/lib/utils";
 import { useDictation } from "@/lib/dictation";
-import { MODEL_CHOICES, EFFORT_CHOICES, EFFORT_HINT, modelFamily, modelLabelFor, effortLabel } from "@/lib/models";
+import { MODEL_CHOICES, EFFORT_CHOICES, EFFORT_HINT, ADVISOR_CHOICES, ADVISOR_HINT, modelFamily, modelLabelFor, effortLabel } from "@/lib/models";
 import {
   mountChat, enqueueChat, sendBash, stopBash, stopChat, subscribeChat, chatQueue, removeQueued, answerChat,
   chatItems, chatRunning, chatStatus, chatBg, chatSince, chatHydrated, chatConnected, clearChat, chatModel, chatGoal,
   type ChatItem, type ToolItem, type AskItem, type UsageItem, type NoticeItem, type ModelInfo, type GoalStatusItem, type GoalInfo,
 } from "@/lib/chat";
 
+/** "opus" → "Opus", "claude-opus-5-5" → "Opus 5.5". */
+function advisorName(m: unknown): string {
+  const s = typeof m === "string" ? m : "";
+  return ADVISOR_CHOICES.find((c) => c.id === s)?.label ?? (s ? modelLabelFor(s) : "the advisor");
+}
+
 function toolSummary(it: ToolItem): string {
   const i = it.input || {};
+  // Advisor card: "Consulting Opus" while it runs, then the CLI-style outcome line.
+  if (it.name === "advisor") return it.status === "running" ? "Consulting " + advisorName(i.model) : String(it.result || "").split("\n")[0];
   if (typeof i.command === "string") return i.command;
   if (typeof i.file_path === "string") return i.file_path;
   if (typeof i.path === "string") return i.path;
@@ -39,6 +47,7 @@ const SLASH_COMMANDS = [
   { cmd: "/context", desc: "Show what's filling the context window" },
   { cmd: "/model", desc: "Show or switch the model (e.g. /model sonnet)" },
   { cmd: "/effort", desc: "Set reasoning effort (low, medium, high, xhigh, max)" },
+  { cmd: "/advisor", desc: "Pick a stronger model Claude consults (opus, sonnet, fable, off)" },
   { cmd: "/goal", desc: "Keep working until a condition is met (/goal clear to stop)" },
 ];
 // The subset a guest share may run. Mirrors the server's RESET_COMMANDS - this only
@@ -61,6 +70,7 @@ function ModelPill({ slug }: { slug: string }) {
   // Second level of the menu, exactly like the web app: the model list stays put and
   // the effort levels open beside it.
   const [effortOpen, setEffortOpen] = useState(false);
+  const [advisorOpen, setAdvisorOpen] = useState(false);
   const info = chatModel(slug);
   // Prefer the pick for the family - the raw id lags one turn behind a switch.
   const src = info.chosen || info.id || info.def;
@@ -68,7 +78,7 @@ function ModelPill({ slug }: { slug: string }) {
   // Not shown, but still steers the pick: switching families keeps the current
   // window size, so a fable[1m] user tapping Sonnet gets sonnet[1m], not 200K.
   const oneM = info.window >= 1_000_000;
-  const pick = (text: string) => { enqueueChat(slug, text); setOpen(false); setEffortOpen(false); };
+  const pick = (text: string) => { enqueueChat(slug, text); setOpen(false); setEffortOpen(false); setAdvisorOpen(false); };
   const effort = info.effort;
   // Nothing nameable yet (no pick, no live process, default still being probed) -   // no chip at all; it springs in once the name arrives.
   if (!src) return null;
@@ -80,16 +90,24 @@ function ModelPill({ slug }: { slug: string }) {
       transition={{ type: "spring", stiffness: 420, damping: 26 }}
     >
       <button
-        onClick={() => { setOpen((o) => !o); setEffortOpen(false); }}
-        title="Switch model or effort"
+        onClick={() => { setOpen((o) => !o); setEffortOpen(false); setAdvisorOpen(false); }}
+        title="Switch model, effort or advisor"
         className="flex items-center gap-1.5 h-8 px-2.5 rounded-md bg-panel2 text-[12px] text-fg hover:bg-border/60 transition-colors"
       >
         <span className="font-medium whitespace-nowrap">{modelLabel(info)}</span>
         {effortLabel(effort) && <span className="text-muted whitespace-nowrap">{effortLabel(effort)}</span>}
+        {info.advisor && (
+          <span
+            className={cn("flex items-center gap-0.5 text-muted whitespace-nowrap", info.advisorOff && "opacity-45 line-through")}
+            title={info.advisorOff ? `Advisor: ${advisorName(info.advisor)}. ${info.advisorOff}.` : `Advisor: ${advisorName(info.advisor)}, active in this chat`}
+          >
+            <Brain size={12} className={info.advisorOff ? "text-muted" : "text-accent"} />{advisorName(info.advisor)}
+          </span>
+        )}
       </button>
       {open && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => { setOpen(false); setEffortOpen(false); }} />
+          <div className="fixed inset-0 z-40" onClick={() => { setOpen(false); setEffortOpen(false); setAdvisorOpen(false); }} />
           <div className="absolute bottom-full left-0 mb-2 z-50 w-72 squircle rounded-2xl border border-border bg-panel shadow-2xl shadow-black/50 p-1.5">
             {MODEL_CHOICES.map((m) => (
               <button
@@ -106,7 +124,7 @@ function ModelPill({ slug }: { slug: string }) {
             ))}
             <div className="my-1 mx-2 border-t border-border" />
             <button
-              onClick={() => setEffortOpen((o) => !o)}
+              onClick={() => { setEffortOpen((o) => !o); setAdvisorOpen(false); }}
               className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-panel2 transition-colors"
             >
               <span className="flex-1 text-[14px] text-fg">Effort</span>
@@ -127,6 +145,30 @@ function ModelPill({ slug }: { slug: string }) {
                       <span className="text-[11px] text-warn whitespace-nowrap">{e.note}</span>
                     )}
                     {effort === e.id && <Check size={14} className="text-accent shrink-0 ml-auto" />}
+                  </button>
+                ))}
+              </div>
+            )}
+            <button
+              onClick={() => { setAdvisorOpen((o) => !o); setEffortOpen(false); }}
+              className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-panel2 transition-colors"
+            >
+              <span className="flex-1 text-[14px] text-fg">Advisor</span>
+              <span className="text-[12px] text-muted">{info.advisor ? advisorName(info.advisor) : "Off"}</span>
+              <ChevronRight size={14} className={cn("text-muted transition-transform", advisorOpen && "rotate-90")} />
+            </button>
+            {advisorOpen && (
+              <div className="mt-0.5 mx-1 mb-0.5 rounded-lg bg-panel2/60 p-1">
+                <p className="px-1.5 py-1.5 text-[12px] leading-snug text-muted">{ADVISOR_HINT}</p>
+                {info.advisorOff && <p className="px-1.5 pb-1.5 text-[12px] leading-snug text-warn">{info.advisorOff}.</p>}
+                {ADVISOR_CHOICES.map((a) => (
+                  <button
+                    key={a.id}
+                    onClick={() => pick("/advisor " + a.id)}
+                    className="w-full flex items-center gap-2 rounded-md px-1.5 py-1.5 text-left hover:bg-panel transition-colors"
+                  >
+                    <span className="text-[14px] text-fg">{a.label}</span>
+                    {(a.id === "off" ? !info.advisor : modelFamily(info.advisor) === a.id) && <Check size={14} className="text-accent shrink-0 ml-auto" />}
                   </button>
                 ))}
               </div>
@@ -313,6 +355,8 @@ function ToolCard({ it, slug }: { it: ToolItem; slug: string }) {
   const read = useMemo(() => readLines(it), [it.name, it.result, it.isError]);
   const adds = diff ? diff.reduce((n, l) => n + (l.t === 1 ? 1 : 0), 0) : 0;
   const dels = diff ? diff.reduce((n, l) => n + (l.t === -1 ? 1 : 0), 0) : 0;
+  // The advisor has no input worth dumping, and its result is often just the header line.
+  const advisor = it.name === "advisor";
   return (
     <div className="rounded-xl border border-border bg-panel/50 overflow-hidden">
       {/* Header row: the expand toggle and Stop are siblings - a Stop nested inside the
@@ -322,8 +366,9 @@ function ToolCard({ it, slug }: { it: ToolItem; slug: string }) {
           <ChevronRight size={14} className={cn("text-muted transition-transform shrink-0", open && "rotate-90")} />
           {it.local
             ? <Terminal size={13} className="text-warn shrink-0" />
+            : advisor ? <Brain size={13} className="text-accent shrink-0" />
             : <Wrench size={13} className="text-muted shrink-0" />}
-          <span className="text-[13px] font-medium shrink-0">{it.local ? "You ran" : it.name}</span>
+          <span className="text-[13px] font-medium shrink-0">{it.local ? "You ran" : advisor ? "Advisor" : it.name}</span>
           <span className="text-[12px] text-muted truncate flex-1 font-mono">{toolSummary(it)}</span>
           {diff && (adds > 0 || dels > 0) && (
             <span className="shrink-0 flex items-center gap-1.5 text-[11px] font-mono tabular-nums">
@@ -366,13 +411,13 @@ function ToolCard({ it, slug }: { it: ToolItem; slug: string }) {
                 />
               </button>
             )
-            : it.local ? null
+            : it.local || advisor ? null
             : (
               <pre className="p-2.5 rounded-lg bg-bg border border-border overflow-x-auto text-[11.5px] leading-relaxed text-muted">
                 {(() => { try { return JSON.stringify(it.input, null, 2); } catch { return String(it.input); } })()}
               </pre>
             )}
-          {it.result != null && it.result !== "" && !read && !showImg && (!diff || it.isError) && (
+          {it.result != null && it.result !== "" && !read && !showImg && (!diff || it.isError) && !(advisor && it.result.startsWith("Advisor ") && !it.result.includes("\n")) && (
             <pre className={cn("p-2.5 rounded-lg bg-bg border border-border overflow-x-auto max-h-72 text-[11.5px] leading-relaxed whitespace-pre-wrap break-words", it.isError ? "text-danger" : "text-fg/80")}>
               {it.result}
             </pre>
@@ -613,7 +658,9 @@ function NoticeLine({ it }: { it: NoticeItem }) {
     <div className="flex items-center gap-2.5 py-1 text-[12px] text-muted">
       <div className="h-px flex-1 bg-border" />
       <div className="flex items-center gap-1.5 shrink min-w-0 text-center text-balance break-words">
-        <Sparkles size={12} className="text-muted shrink-0" />
+        {it.variant === "advisor"
+          ? <Brain size={12} className="text-accent shrink-0" />
+          : <Sparkles size={12} className="text-muted shrink-0" />}
         <span className="min-w-0">{it.text}</span>
       </div>
       <div className="h-px flex-1 bg-border" />

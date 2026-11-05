@@ -29,6 +29,17 @@ export const EFFORT_CHOICES = [
 
 export type EffortId = (typeof EFFORT_CHOICES)[number]["id"];
 
+/** `/advisor` choices, from the CLI's own usage line: /advisor <fable|opus|sonnet|off>. */
+export const ADVISOR_CHOICES = [
+  { id: "off", label: "No advisor" },
+  { id: "fable", label: "Fable" },
+  { id: "opus", label: "Opus" },
+  { id: "sonnet", label: "Sonnet" },
+] as const;
+
+export const ADVISOR_HINT =
+  "A stronger model Claude consults at key moments. Its tokens bill at its own rates. Applies to all sessions.";
+
 export const EFFORT_HINT =
   "Higher effort means more thorough responses, but takes longer and uses your limits faster.";
 
