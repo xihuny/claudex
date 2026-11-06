@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { AnimatePresence, m as motion } from "motion/react";
 import {
-  ArrowLeft, RotateCw, ExternalLink, Bell, Globe, Server, Info, Activity, Copy, Palette, Brain,
+  ArrowLeft, RotateCw, ExternalLink, Bell, Globe, Server, Info, Activity, Copy, Palette, Brain, KeyRound,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { toast } from "sonner";
@@ -18,15 +18,17 @@ import { Card, HubCard, Note, Row, Toggle } from "@/components/settings/parts";
 import { VpsGuide } from "@/components/settings/VpsGuide";
 import { AppearancePane } from "@/components/settings/AppearancePane";
 import { ModelPane } from "@/components/settings/ModelPane";
+import { BillingPane, type Billing } from "@/components/settings/BillingPane";
 import { modelLabelFor, effortLabel } from "@/lib/models";
 import { useTheme, THEMES } from "@/store/theme";
 import { ALL_STEP_IDS, loadDoneIds } from "@/components/settings/guide";
 
-type PaneId = "appearance" | "model" | "status" | "access" | "notify" | "vps" | "about";
+type PaneId = "appearance" | "model" | "billing" | "status" | "access" | "notify" | "vps" | "about";
 
 const PANE_TITLES: Record<PaneId, string> = {
   appearance: "Appearance",
   model: "Model",
+  billing: "API billing",
   status: "System status",
   access: "Public access",
   notify: "Notifications",
@@ -150,6 +152,7 @@ export function SetupScreen() {
                   {pane === null && <Hub {...ctx} />}
                   {pane === "appearance" && <AppearancePane />}
                   {pane === "model" && <ModelPane />}
+                  {pane === "billing" && <BillingPane />}
                   {pane === "status" && <StatusPane {...ctx} pw={pw} setPw={setPw} />}
                   {pane === "access" && <AccessPane {...ctx} />}
                   {pane === "notify" && <NotifyPane {...ctx} />}
@@ -182,6 +185,8 @@ function Hub({ s, goto }: Ctx) {
       } catch { setModelChip(" - "); }
     })();
   }, []);
+  const [billing, setBilling] = useState<Billing | null>(null);
+  useEffect(() => { api<Billing>("GET", "/api/apikey").then(setBilling).catch(() => {}); }, []);
   const checks = healthChecks(s);
   const ok = checks.filter((c) => c.ok).length;
   const allOk = checks.length > 0 && ok === checks.length;
@@ -199,6 +204,12 @@ function Hub({ s, goto }: Ctx) {
       id: "model", icon: Brain, title: "Model",
       desc: "Default model and effort for new chats",
       chip: modelChip, tone: "muted",
+    },
+    {
+      id: "billing", icon: KeyRound, title: "API billing",
+      desc: "Continue on API balance when the subscription runs out",
+      chip: !billing ? "…" : billing.enabled ? "API" : billing.hasKey ? "Subscription" : "No key",
+      tone: billing?.enabled ? "warn" : "muted",
     },
     {
       id: "status", icon: Activity, title: "System status",

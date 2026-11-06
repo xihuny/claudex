@@ -197,6 +197,24 @@ const ctxWindow = (model) => {
 };
 const loadConfig = () => { try { return JSON.parse(fs.readFileSync(CONFIG_FILE)); } catch { return {}; } };
 const saveConfig = (c) => fs.writeFileSync(CONFIG_FILE, JSON.stringify(c, null, 2));
+// ---- API billing (manual toggle) ----
+// The Anthropic API key lives in its own 0600 file and never leaves the server: the UI only
+// sees whether one is set plus its last 4 characters. It is injected into chat processes
+// only (childEnv strips ANTHROPIC_API_KEY, so terminals and dev servers never inherit it).
+const APIKEY_FILE = path.join(DATA_DIR, ".apikey");
+const API_USAGE_FILE = path.join(DATA_DIR, "api-usage.json");
+const readApiKey = () => { try { return fs.readFileSync(APIKEY_FILE, "utf8").trim(); } catch { return ""; } };
+const apiBillingOn = () => !!loadConfig().apiBilling && !!readApiKey();
+const loadApiUsage = () => { try { return JSON.parse(fs.readFileSync(API_USAGE_FILE, "utf8")); } catch { return {}; } };
+function addApiSpend(usd) {
+  if (!(usd > 0)) return;
+  const u = loadApiUsage();
+  const day = new Date().toISOString().slice(0, 10);
+  const d = u[day] || { usd: 0, turns: 0 };
+  d.usd += usd; d.turns += 1; u[day] = d;
+  for (const k of Object.keys(u).sort().slice(0, -120)) delete u[k];   // keep ~4 months
+  fs.writeFileSync(API_USAGE_FILE, JSON.stringify(u));
+}
 const defaultLaunch = () => { const c = loadConfig(); return c.defaultLaunch != null ? c.defaultLaunch : LAUNCH; };
 // Model/effort defaults picked in Settings. Without them a brand-new session rides
 // whatever the plan default happens to be on Anthropic's side, which changes under you.
@@ -219,7 +237,7 @@ const authed = (req) => {
 // Environment for every child process (claude, terminals, dev servers, helpers). The
 // access password and other claudex secrets are never inherited: a child that can run
 // `printenv` (a guest with commands on, a dev server's own code) must not learn them.
-const SECRET_ENV = ["TOKEN", "CX_ASK_TOKEN", "CX_HOOK_TOKEN"];
+const SECRET_ENV = ["TOKEN", "CX_ASK_TOKEN", "CX_HOOK_TOKEN", "ANTHROPIC_API_KEY"];
 function childEnv(extra) {
   const env = { ...process.env, ...(extra || {}) };
   for (const k of Object.keys(env)) if (k.startsWith("CLAUDE_CODE_") || SECRET_ENV.includes(k)) delete env[k];
@@ -1316,6 +1334,10 @@ function ensureChat(slug, proj) {
   // already set), so the hook must skip it to avoid a duplicate - and a race where the
   // hook's POST beats c.lastReply being set and sends the generic fallback body.
   const env = childEnv({ CLAUDEX_CHAT: "1" });
+  // Manual API billing: this process bills the API key instead of the subscription.
+  const apiMode = apiBillingOn();
+  if (apiMode) env.ANTHROPIC_API_KEY = readApiKey();
+  c.apiMode = apiMode; c.apiCostSeen = 0;
   // The owner's advisorModel is global and would bill a guest's turns to the owner at the
   // advisor's rates - keep it off in shares. Set after childEnv(), which strips CLAUDE_CODE_*.
   if (guest) env.CLAUDE_CODE_DISABLE_ADVISOR_TOOL = "1";
@@ -1478,6 +1500,12 @@ function ensureChat(slug, proj) {
       }
       const tu = c.turnUsage;
       if (tu && (tu.in || tu.cacheRead || tu.cacheCreate || tu.out)) chatSend(c, { t: "usage", ...tu, ms: e.duration_ms || 0, window: c.window || ctxWindow(c.model) });
+      // total_cost_usd is cumulative for the process, so book only the delta.
+      if (c.apiMode && e.total_cost_usd > 0) {
+        const delta = e.total_cost_usd >= c.apiCostSeen ? e.total_cost_usd - c.apiCostSeen : e.total_cost_usd;
+        c.apiCostSeen = e.total_cost_usd;
+        try { addApiSpend(delta); } catch {}
+      }
       chatSend(c, { t: "result", ok: !e.is_error, cost: e.total_cost_usd, error: e.is_error ? ((Array.isArray(e.errors) && e.errors.join("; ")) || e.result || "error") : undefined });
       c.running = false;
       chatSend(c, { t: "running", running: false });
@@ -1505,7 +1533,11 @@ function ensureChat(slug, proj) {
       // into the SAME process so queued turns reuse the cache too. Never reap while a
       // background task is pending: killing the process would abandon it mid-flight.
       if (c.queue.length) { const next = c.queue.shift(); emitQueue(c); sendTurn(slug, proj, next); }
-      else if (c.bgTasks === 0) scheduleIdleShutdown(c);
+      else if (c.bgTasks === 0) {
+        // Billing mode changed mid-turn: stop the idle process so the next message respawns it.
+        if (c.restartIdle) { c.restartIdle = false; try { child.stdin.end(); } catch {} try { child.kill("SIGTERM"); } catch {} }
+        else scheduleIdleShutdown(c);
+      }
     }
   };
   child.stdout.on("data", (d) => {
@@ -1902,6 +1934,54 @@ app.post("/api/config", (req, res) => {
   // own - refresh them now instead of waiting for the next turn.
   for (const slug of Object.keys(chats)) emitModel(chats[slug]);
   res.json(configPayload());
+});
+
+// ---- API billing endpoints ----
+const apiBillingPayload = () => {
+  const k = readApiKey();
+  const u = loadApiUsage();
+  const sum = (days) => { const from = new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10); let usd = 0, turns = 0; for (const [d, v] of Object.entries(u)) if (d >= from) { usd += v.usd; turns += v.turns; } return { usd, turns }; };
+  const today = new Date().toISOString().slice(0, 10);
+  return { hasKey: !!k, last4: k ? k.slice(-4) : "", enabled: apiBillingOn(), today: sum(1), week: sum(7), month: sum(30), days: Object.keys(u).sort().slice(-14).map((d) => ({ day: d, usd: u[d].usd })), todayKey: today };
+};
+// Running chat processes keep the env they were spawned with. Idle ones are stopped now so
+// the next message respawns them (with --resume) on the new billing mode; a busy one
+// finishes its turn first and is stopped when it goes idle (see applyBillingToChat).
+function applyBillingToChats() {
+  const mode = apiBillingOn();
+  for (const c of Object.values(chats)) {
+    if (!c.child || c.apiMode === mode) continue;
+    if (c.running) c.restartIdle = true;
+    else { try { c.child.stdin.end(); } catch {} try { c.child.kill("SIGTERM"); } catch {} }
+  }
+}
+app.get("/api/apikey", (req, res) => { if (!authed(req)) return res.sendStatus(401); res.json(apiBillingPayload()); });
+app.post("/api/apikey", async (req, res) => {
+  if (!authed(req)) return res.sendStatus(401);
+  const key = String((req.body && req.body.key) || "").trim();
+  if (!/^sk-ant-[A-Za-z0-9_-]{20,}$/.test(key) || key.startsWith("sk-ant-admin")) return res.status(400).json({ error: "Not an Anthropic API key (expected sk-ant-api...)" });
+  // One cheap call to catch a typo or a revoked key before it breaks a chat.
+  try {
+    const r = await fetch("https://api.anthropic.com/v1/models?limit=1", { headers: { "x-api-key": key, "anthropic-version": "2023-06-01" }, signal: AbortSignal.timeout(10000) });
+    if (r.status === 401 || r.status === 403) return res.status(400).json({ error: "Anthropic rejected this key" });
+  } catch { return res.status(502).json({ error: "Could not reach Anthropic to check the key" }); }
+  writeSecret(APIKEY_FILE, key);
+  res.json(apiBillingPayload());
+});
+app.delete("/api/apikey", (req, res) => {
+  if (!authed(req)) return res.sendStatus(401);
+  try { fs.unlinkSync(APIKEY_FILE); } catch {}
+  const c = loadConfig(); delete c.apiBilling; saveConfig(c);
+  applyBillingToChats();
+  res.json(apiBillingPayload());
+});
+app.post("/api/apikey/enabled", (req, res) => {
+  if (!authed(req)) return res.sendStatus(401);
+  const on = !!(req.body && req.body.enabled);
+  if (on && !readApiKey()) return res.status(400).json({ error: "Add an API key first" });
+  const c = loadConfig(); if (on) c.apiBilling = true; else delete c.apiBilling; saveConfig(c);
+  applyBillingToChats();
+  res.json(apiBillingPayload());
 });
 
 app.get("/api/browse", (req, res) => {
