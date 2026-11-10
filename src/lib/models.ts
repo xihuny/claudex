@@ -9,20 +9,24 @@ export interface ModelChoice {
   desc: string;
   /** Whether the family has a 1M-context variant ("opus[1m]"). */
   oneM: boolean;
+  /** Usage multiplier of "max" effort on this model, shown as the Max warning. */
+  maxX: string;
+  /** Effort the model runs at when none is picked; the menu marks it Recommended. */
+  defEffort: string;
 }
 
 export const MODEL_CHOICES: ModelChoice[] = [
-  { alias: "fable", family: "fable", label: "Fable 5.1", desc: "For your toughest challenges", oneM: true },
-  { alias: "opus", family: "opus", label: "Opus 5.5", desc: "For complex tasks", oneM: true },
-  { alias: "sonnet", family: "sonnet", label: "Sonnet 5", desc: "Most efficient for everyday tasks", oneM: true },
-  { alias: "haiku", family: "haiku", label: "Haiku 4.5", desc: "Fastest for quick answers", oneM: false },
+  { alias: "fable", family: "fable", label: "Fable 5.2", desc: "For your toughest challenges", oneM: true, maxX: "3.5×", defEffort: "medium" },
+  { alias: "opus", family: "opus", label: "Opus 5.5", desc: "For complex tasks", oneM: true, maxX: "4×", defEffort: "medium" },
+  { alias: "sonnet", family: "sonnet", label: "Sonnet 5.5", desc: "Most efficient for everyday tasks", oneM: true, maxX: "5×", defEffort: "medium" },
+  { alias: "haiku", family: "haiku", label: "Haiku 5.5", desc: "Fastest for quick answers", oneM: false, maxX: "8×", defEffort: "medium" },
 ];
 
 /** CLI effort levels, in the order the picker shows them. `note` is the usage warning. */
 export const EFFORT_CHOICES = [
   { id: "low", label: "Low" },
   { id: "medium", label: "Medium" },
-  { id: "high", label: "High", isDefault: true },
+  { id: "high", label: "High" },
   { id: "xhigh", label: "Extra" },
   { id: "max", label: "Max", note: "1.5× or more usage" },
 ] as const;
@@ -46,6 +50,13 @@ export const EFFORT_HINT =
 export function effortLabel(e: string | null | undefined): string | null {
   if (!e) return null;
   return EFFORT_CHOICES.find((c) => c.id === e)?.label ?? e;
+}
+
+/** The effort row's warning, with the max multiplier of the model family when known. */
+export function effortNote(e: (typeof EFFORT_CHOICES)[number], fam: string | null): string | undefined {
+  if (!("note" in e)) return undefined;
+  const x = MODEL_CHOICES.find((m) => m.family === fam)?.maxX;
+  return x ? x + " or more usage" : e.note;
 }
 
 export function modelFamily(s: string | null | undefined): string | null {

@@ -9,7 +9,7 @@ import { Check } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { Card, Note, Toggle } from "@/components/settings/parts";
-import { MODEL_CHOICES, EFFORT_CHOICES, EFFORT_HINT, modelFamily, modelLabelFor } from "@/lib/models";
+import { MODEL_CHOICES, EFFORT_CHOICES, EFFORT_HINT, effortNote, modelFamily, modelLabelFor } from "@/lib/models";
 import { cn } from "@/lib/utils";
 
 interface Config {
@@ -99,7 +99,7 @@ export function ModelPane() {
           <Option
             key={e.id}
             label={e.label}
-            note={"note" in e ? e.note : undefined}
+            note={effortNote(e, modelFamily(picked || cfg?.model))}
             on={cfg?.defaultEffort === e.id}
             onClick={() => save({ defaultEffort: e.id })}
           />

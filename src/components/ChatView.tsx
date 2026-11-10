@@ -9,7 +9,7 @@ import { api, uploadImage, uploadUrl, fsFileUrl } from "@/lib/api";
 import { Lightbox } from "@/components/ui/Lightbox";
 import { cn } from "@/lib/utils";
 import { useDictation } from "@/lib/dictation";
-import { MODEL_CHOICES, EFFORT_CHOICES, EFFORT_HINT, ADVISOR_CHOICES, ADVISOR_HINT, modelFamily, modelLabelFor, effortLabel } from "@/lib/models";
+import { MODEL_CHOICES, EFFORT_CHOICES, EFFORT_HINT, ADVISOR_CHOICES, ADVISOR_HINT, effortNote, modelFamily, modelLabelFor, effortLabel } from "@/lib/models";
 import {
   mountChat, enqueueChat, sendBash, stopBash, stopChat, subscribeChat, chatQueue, removeQueued, answerChat,
   chatItems, chatRunning, chatStatus, chatBg, chatSince, chatHydrated, chatConnected, clearChat, chatModel, chatGoal,
@@ -71,6 +71,37 @@ function ModelPill({ slug }: { slug: string }) {
   // the effort levels open beside it.
   const [effortOpen, setEffortOpen] = useState(false);
   const [advisorOpen, setAdvisorOpen] = useState(false);
+  // Where the open submenu sits: beside the menu (top offset of its row) when the
+  // viewport has room on the right, else null = inline under its row.
+  const [side, setSide] = useState<number | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const flyRef = useRef<HTMLDivElement>(null);
+  const subOpen = effortOpen || advisorOpen;
+  // Lift the flyout if it would run past the bottom of the viewport.
+  useLayoutEffect(() => {
+    const fly = flyRef.current;
+    if (!fly || side === null) return;
+    const over = fly.getBoundingClientRect().bottom - (window.innerHeight - 8);
+    if (over > 0) fly.style.top = side - over + "px";
+  }, [side, effortOpen, advisorOpen]);
+  const hasRoom = () => {
+    const menu = menuRef.current;
+    return !!menu && menu.getBoundingClientRect().right + 8 + 288 <= window.innerWidth - 8;
+  };
+  // Beside the menu a click (or a mouse hover) just opens; inline it toggles.
+  const toggleSub = (which: "effort" | "advisor", row: HTMLElement) => {
+    const room = hasRoom();
+    setSide(room ? row.offsetTop : null);
+    if (which === "effort") { setEffortOpen((o) => room || !o); setAdvisorOpen(false); }
+    else { setAdvisorOpen((o) => room || !o); setEffortOpen(false); }
+  };
+  const hoverSub = (which: "effort" | "advisor", ev: React.PointerEvent<HTMLElement>) => {
+    if (ev.pointerType === "mouse" && hasRoom()) toggleSub(which, ev.currentTarget);
+  };
+  // Hovering a model row closes the flyout, like a native menu.
+  const hoverModel = (ev: React.PointerEvent<HTMLElement>) => {
+    if (ev.pointerType === "mouse" && side !== null) { setEffortOpen(false); setAdvisorOpen(false); }
+  };
   const info = chatModel(slug);
   // Prefer the pick for the family - the raw id lags one turn behind a switch.
   const src = info.chosen || info.id || info.def;
@@ -79,7 +110,50 @@ function ModelPill({ slug }: { slug: string }) {
   // window size, so a fable[1m] user tapping Sonnet gets sonnet[1m], not 200K.
   const oneM = info.window >= 1_000_000;
   const pick = (text: string) => { enqueueChat(slug, text); setOpen(false); setEffortOpen(false); setAdvisorOpen(false); };
-  const effort = info.effort;
+  // No pick means the model's own default, so mark and name that level.
+  const defEffort = MODEL_CHOICES.find((m) => m.family === fam)?.defEffort;
+  const effort = info.effort || defEffort;
+  // Items sit on bg-panel in the flyout, on a tinted inset when inline.
+  const itemHover = side !== null ? "hover:bg-panel2" : "hover:bg-panel";
+  const effortBody = (
+    <>
+      <p className="px-1.5 py-1.5 text-[12px] leading-snug text-muted">{EFFORT_HINT}</p>
+      {EFFORT_CHOICES.map((e) => (
+        <button
+          key={e.id}
+          onClick={() => pick("/effort " + e.id)}
+          className={cn("w-full flex items-center gap-2 rounded-md px-1.5 py-1.5 text-left transition-colors", itemHover)}
+        >
+          <span className="text-[14px] text-fg">{e.label}</span>
+          {e.id === defEffort && (
+            <span className="text-[11px] text-muted border border-border rounded-full px-1.5 leading-[18px] whitespace-nowrap">Recommended</span>
+          )}
+          {effortNote(e, fam) && (
+            <span className="flex items-center gap-1 text-[11px] text-warn bg-warn/15 rounded-full px-1.5 leading-[18px] whitespace-nowrap">
+              <TriangleAlert size={11} />{effortNote(e, fam)}
+            </span>
+          )}
+          {effort === e.id && <Check size={14} className="text-accent shrink-0 ml-auto" />}
+        </button>
+      ))}
+    </>
+  );
+  const advisorBody = (
+    <>
+      <p className="px-1.5 py-1.5 text-[12px] leading-snug text-muted">{ADVISOR_HINT}</p>
+      {info.advisorOff && <p className="px-1.5 pb-1.5 text-[12px] leading-snug text-warn">{info.advisorOff}.</p>}
+      {ADVISOR_CHOICES.map((a) => (
+        <button
+          key={a.id}
+          onClick={() => pick("/advisor " + a.id)}
+          className={cn("w-full flex items-center gap-2 rounded-md px-1.5 py-1.5 text-left transition-colors", itemHover)}
+        >
+          <span className="text-[14px] text-fg">{a.label}</span>
+          {(a.id === "off" ? !info.advisor : modelFamily(info.advisor) === a.id) && <Check size={14} className="text-accent shrink-0 ml-auto" />}
+        </button>
+      ))}
+    </>
+  );
   // Nothing nameable yet (no pick, no live process, default still being probed) -   // no chip at all; it springs in once the name arrives.
   if (!src) return null;
   return (
@@ -108,10 +182,11 @@ function ModelPill({ slug }: { slug: string }) {
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => { setOpen(false); setEffortOpen(false); setAdvisorOpen(false); }} />
-          <div className="absolute bottom-full left-0 mb-2 z-50 w-72 squircle rounded-2xl border border-border bg-panel shadow-2xl shadow-black/50 p-1.5">
+          <div ref={menuRef} className="absolute bottom-full left-0 mb-2 z-50 w-72 squircle rounded-2xl border border-border bg-panel shadow-2xl shadow-black/50 p-1.5">
             {MODEL_CHOICES.map((m) => (
               <button
                 key={m.alias}
+                onPointerEnter={hoverModel}
                 onClick={() => pick("/model " + (oneM && m.oneM ? m.alias + "[1m]" : m.alias))}
                 className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-panel2 transition-colors"
               >
@@ -124,53 +199,36 @@ function ModelPill({ slug }: { slug: string }) {
             ))}
             <div className="my-1 mx-2 border-t border-border" />
             <button
-              onClick={() => { setEffortOpen((o) => !o); setAdvisorOpen(false); }}
-              className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-panel2 transition-colors"
+              onPointerEnter={(ev) => hoverSub("effort", ev)}
+              onClick={(ev) => toggleSub("effort", ev.currentTarget)}
+              className={cn("w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-panel2 transition-colors", effortOpen && side !== null && "bg-panel2")}
             >
               <span className="flex-1 text-[14px] text-fg">Effort</span>
               <span className="text-[12px] text-muted">{effortLabel(effort) ?? "Default"}</span>
-              <ChevronRight size={14} className={cn("text-muted transition-transform", effortOpen && "rotate-90")} />
+              <ChevronRight size={14} className={cn("text-muted transition-transform", effortOpen && side === null && "rotate-90")} />
             </button>
-            {effortOpen && (
-              <div className="mt-0.5 mx-1 mb-0.5 rounded-lg bg-panel2/60 p-1">
-                <p className="px-1.5 py-1.5 text-[12px] leading-snug text-muted">{EFFORT_HINT}</p>
-                {EFFORT_CHOICES.map((e) => (
-                  <button
-                    key={e.id}
-                    onClick={() => pick("/effort " + e.id)}
-                    className="w-full flex items-center gap-2 rounded-md px-1.5 py-1.5 text-left hover:bg-panel transition-colors"
-                  >
-                    <span className="text-[14px] text-fg">{e.label}</span>
-                    {"note" in e && e.note && (
-                      <span className="text-[11px] text-warn whitespace-nowrap">{e.note}</span>
-                    )}
-                    {effort === e.id && <Check size={14} className="text-accent shrink-0 ml-auto" />}
-                  </button>
-                ))}
-              </div>
+            {effortOpen && side === null && (
+              <div className="mt-0.5 mx-1 mb-0.5 rounded-lg bg-panel2/60 p-1">{effortBody}</div>
             )}
             <button
-              onClick={() => { setAdvisorOpen((o) => !o); setEffortOpen(false); }}
-              className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-panel2 transition-colors"
+              onPointerEnter={(ev) => hoverSub("advisor", ev)}
+              onClick={(ev) => toggleSub("advisor", ev.currentTarget)}
+              className={cn("w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-panel2 transition-colors", advisorOpen && side !== null && "bg-panel2")}
             >
               <span className="flex-1 text-[14px] text-fg">Advisor</span>
               <span className="text-[12px] text-muted">{info.advisor ? advisorName(info.advisor) : "Off"}</span>
-              <ChevronRight size={14} className={cn("text-muted transition-transform", advisorOpen && "rotate-90")} />
+              <ChevronRight size={14} className={cn("text-muted transition-transform", advisorOpen && side === null && "rotate-90")} />
             </button>
-            {advisorOpen && (
-              <div className="mt-0.5 mx-1 mb-0.5 rounded-lg bg-panel2/60 p-1">
-                <p className="px-1.5 py-1.5 text-[12px] leading-snug text-muted">{ADVISOR_HINT}</p>
-                {info.advisorOff && <p className="px-1.5 pb-1.5 text-[12px] leading-snug text-warn">{info.advisorOff}.</p>}
-                {ADVISOR_CHOICES.map((a) => (
-                  <button
-                    key={a.id}
-                    onClick={() => pick("/advisor " + a.id)}
-                    className="w-full flex items-center gap-2 rounded-md px-1.5 py-1.5 text-left hover:bg-panel transition-colors"
-                  >
-                    <span className="text-[14px] text-fg">{a.label}</span>
-                    {(a.id === "off" ? !info.advisor : modelFamily(info.advisor) === a.id) && <Check size={14} className="text-accent shrink-0 ml-auto" />}
-                  </button>
-                ))}
+            {advisorOpen && side === null && (
+              <div className="mt-0.5 mx-1 mb-0.5 rounded-lg bg-panel2/60 p-1">{advisorBody}</div>
+            )}
+            {subOpen && side !== null && (
+              <div
+                ref={flyRef}
+                style={{ top: side }}
+                className="absolute left-full ml-2 w-72 squircle rounded-2xl border border-border bg-panel shadow-2xl shadow-black/50 p-1.5"
+              >
+                {effortOpen ? effortBody : advisorBody}
               </div>
             )}
           </div>
